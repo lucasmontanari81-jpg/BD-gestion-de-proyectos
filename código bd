@@ -1,0 +1,328 @@
+CREATE TABLE pais (
+    codigo CHAR(3) PRIMARY KEY,
+    nombre VARCHAR(80) NOT NULL
+);
+
+CREATE TABLE provincia (
+    provincia_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    pais_codigo CHAR(3) NOT NULL REFERENCES pais(codigo) ON DELETE CASCADE
+);
+
+CREATE TABLE ciudad (
+    ciudad_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    provincia_id BIGINT NOT NULL REFERENCES provincia(provincia_id) ON DELETE CASCADE
+);
+
+CREATE TABLE aeropuerto (
+    codigo VARCHAR(4) PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    cant_vuelos_prom INTEGER DEFAULT 0,
+    pais_codigo CHAR(3) NOT NULL REFERENCES pais(codigo) ON DELETE CASCADE
+);
+
+
+-- 2. CLIENTE Y FIDELIZACIÓN
+
+
+CREATE TABLE categoria_cliente (
+    categoria_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre VARCHAR(30) NOT NULL,
+    nivel INTEGER UNIQUE NOT NULL,
+    millas_minimas INTEGER NOT NULL,
+    descuento_pct NUMERIC(5,2) DEFAULT 0 NOT NULL,
+    acceso_exclusivo BOOLEAN DEFAULT FALSE NOT NULL
+);
+
+CREATE TABLE cliente (
+    dni VARCHAR(15) PRIMARY KEY,
+    nombre VARCHAR(60) NOT NULL,
+    apellido VARCHAR(60) NOT NULL,
+    email VARCHAR(120) UNIQUE,
+    telefono VARCHAR(30),
+    millas_acumuladas INTEGER DEFAULT 0 NOT NULL,
+    categoria_id BIGINT NOT NULL REFERENCES categoria_cliente(categoria_id)
+);
+
+-- 3. TURISMO
+
+CREATE TABLE agencia (
+    agencia_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    cant_empleados INTEGER CHECK (cant_empleados >= 0),
+    direccion_fisica VARCHAR(200) NOT NULL
+);
+
+CREATE TABLE mayorista (
+    mayorista_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre VARCHAR(120) NOT NULL,
+    facturacion_prom_anual NUMERIC(14,2)
+);
+
+CREATE TABLE agencia_mayorista (
+    agencia_id BIGINT REFERENCES agencia(agencia_id) ON DELETE CASCADE,
+    mayorista_id BIGINT REFERENCES mayorista(mayorista_id) ON DELETE CASCADE,
+    PRIMARY KEY (agencia_id, mayorista_id)
+);
+
+CREATE TABLE hotel (
+    hotel_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre VARCHAR(100) NOT NULL,
+    categoria INTEGER,
+    direccion VARCHAR(200),
+    ciudad_id BIGINT NOT NULL REFERENCES ciudad(ciudad_id)
+);
+
+CREATE TABLE circuito (
+    circuito_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    denominacion VARCHAR(120) NOT NULL,
+    cant_personas_anual_prom INTEGER
+);
+
+CREATE TABLE circuito_ciudad (
+    circuito_id BIGINT REFERENCES circuito(circuito_id) ON DELETE CASCADE,
+    ciudad_id BIGINT REFERENCES ciudad(ciudad_id) ON DELETE CASCADE,
+    PRIMARY KEY (circuito_id, ciudad_id)
+);
+
+CREATE TABLE pasaje (
+    pasaje_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    descripcion VARCHAR(200),
+    horario_vuelo TIMESTAMPTZ,
+    millas_otorgadas INTEGER DEFAULT 0 NOT NULL,
+    aero_salida_id VARCHAR(4) NOT NULL REFERENCES aeropuerto(codigo),
+    aero_llegada_id VARCHAR(4) NOT NULL REFERENCES aeropuerto(codigo)
+);
+
+CREATE TABLE reserva (
+    reserva_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    fecha_reserva TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+    codigo_vuelo VARCHAR(20),
+    millas_generadas INTEGER DEFAULT 0,
+    cliente_dni VARCHAR(15) NOT NULL REFERENCES cliente(dni),
+    agencia_id BIGINT NOT NULL REFERENCES agencia(agencia_id),
+    pasaje_id BIGINT REFERENCES pasaje(pasaje_id),
+    hotel_id BIGINT REFERENCES hotel(hotel_id),
+    circuito_id BIGINT REFERENCES circuito(circuito_id),
+    CONSTRAINT ck_reserva_tipo CHECK (pasaje_id IS NOT NULL OR hotel_id IS NOT NULL OR circuito_id IS NOT NULL)
+);
+
+CREATE TABLE participante (
+    participante_dni VARCHAR(15) PRIMARY KEY,
+    nombre VARCHAR(60) NOT NULL,
+    apellido VARCHAR(60) NOT NULL,
+    cliente_dni VARCHAR(15) NOT NULL REFERENCES cliente(dni)
+);
+
+CREATE TABLE reserva_participante (
+    reserva_id BIGINT REFERENCES reserva(reserva_id) ON DELETE CASCADE,
+    participante_dni VARCHAR(15) REFERENCES participante(participante_dni) ON DELETE CASCADE,
+    nro_asiento VARCHAR(10),
+    PRIMARY KEY (reserva_id, participante_dni)
+);
+
+
+-- 4. VINOTECA
+
+CREATE TABLE bodega (
+    bodega_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre VARCHAR(120) NOT NULL,
+    contacto VARCHAR(120)
+);
+
+CREATE TABLE vino (
+    vino_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    nombre VARCHAR(200) NOT NULL,
+    varietal VARCHAR(100),
+    anio INTEGER,
+    precio NUMERIC(10,2) CHECK (precio > 0),
+    bodega_id BIGINT NOT NULL REFERENCES bodega(bodega_id),
+    categoria_minima_id BIGINT REFERENCES categoria_cliente(categoria_id)
+);
+
+CREATE TABLE stock (
+    stock_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vino_id BIGINT UNIQUE NOT NULL REFERENCES vino(vino_id) ON DELETE CASCADE,
+    cantidad INTEGER DEFAULT 0 NOT NULL CHECK (cantidad >= 0),
+    ultima_actualizacion TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE movimiento_stock (
+    mov_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    vino_id BIGINT NOT NULL REFERENCES vino(vino_id),
+    tipo VARCHAR(20) CHECK (tipo IN ('INGRESO', 'SALIDA')),
+    cantidad INTEGER NOT NULL CHECK (cantidad > 0),
+    fecha TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE venta_vino (
+    venta_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    cliente_dni VARCHAR(15) NOT NULL REFERENCES cliente(dni),
+    fecha TIMESTAMPTZ DEFAULT NOW(),
+    total NUMERIC(12,2),
+    descuento_aplicado NUMERIC(5,2) DEFAULT 0
+);
+
+CREATE TABLE linea_venta_vino (
+    linea_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    venta_id BIGINT NOT NULL REFERENCES venta_vino(venta_id) ON DELETE CASCADE,
+    vino_id BIGINT NOT NULL REFERENCES vino(vino_id),
+    cantidad INTEGER NOT NULL CHECK (cantidad > 0),
+    precio_unitario NUMERIC(10,2) NOT NULL
+);
+
+-- 5. DATOS INICIALES Y FUNCIONES (TRIGGERS)
+
+
+-- Categorías por defecto
+INSERT INTO categoria_cliente (nombre, nivel, millas_minimas, descuento_pct, acceso_exclusivo) VALUES
+('Bronze', 1, 0, 0, FALSE),
+('Silver', 2, 5000, 5, FALSE),
+('Gold', 3, 15000, 12, TRUE),
+('Platinum', 4, 40000, 20, TRUE);
+
+-- Función para recalcular categoría del cliente por DNI
+CREATE OR REPLACE FUNCTION fn_actualizar_categoria(p_dni VARCHAR)
+RETURNS VOID AS $$
+DECLARE
+    v_categoria_id BIGINT;
+BEGIN
+    SELECT categoria_id INTO v_categoria_id
+    FROM categoria_cliente
+    WHERE millas_minimas <= (SELECT millas_acumuladas FROM cliente WHERE dni = p_dni)
+    ORDER BY millas_minimas DESC
+    LIMIT 1;
+
+    UPDATE cliente 
+    SET categoria_id = v_categoria_id 
+    WHERE dni = p_dni;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger: Generación y acumulación de millas al insertar una reserva
+CREATE OR REPLACE FUNCTION fn_trg_procesar_reserva()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_millas INTEGER := 0;
+BEGIN
+    -- Obtener millas del pasaje si existe
+    IF NEW.pasaje_id IS NOT NULL THEN
+        SELECT millas_otorgadas INTO v_millas FROM pasaje WHERE pasaje_id = NEW.pasaje_id;
+    END IF;
+
+    NEW.millas_generadas := COALESCE(v_millas, 0);
+
+    -- Si genera millas, actualiza al cliente y recalcula su categoría
+    IF NEW.millas_generadas > 0 THEN
+        UPDATE cliente
+        SET millas_acumuladas = millas_acumuladas + NEW.millas_generadas
+        WHERE dni = NEW.cliente_dni;
+
+        PERFORM fn_actualizar_categoria(NEW.cliente_dni);
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_procesar_reserva
+BEFORE INSERT ON reserva
+FOR EACH ROW
+EXECUTE FUNCTION fn_trg_procesar_reserva();
+
+-- Trigger: Validación de catálogo exclusivo al agregar líneas de venta
+CREATE OR REPLACE FUNCTION fn_trg_validar_linea_venta()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_categoria_min BIGINT;
+    v_cliente_dni VARCHAR(15);
+    v_nivel_cliente INTEGER;
+    v_nivel_requerido INTEGER;
+BEGIN
+    SELECT categoria_minima_id INTO v_categoria_min
+    FROM vino WHERE vino_id = NEW.vino_id;
+
+    IF v_categoria_min IS NOT NULL THEN
+        SELECT cliente_dni INTO v_cliente_dni FROM venta_vino WHERE venta_id = NEW.venta_id;
+        
+        SELECT cc.nivel INTO v_nivel_cliente
+        FROM cliente c 
+        JOIN categoria_cliente cc ON c.categoria_id = cc.categoria_id
+        WHERE c.dni = v_cliente_dni;
+
+        SELECT nivel INTO v_nivel_requerido
+        FROM categoria_cliente WHERE categoria_id = v_categoria_min;
+
+        IF v_nivel_cliente < v_nivel_requerido THEN
+            RAISE EXCEPTION 'El cliente no alcanza la categoría mínima requerida para comprar este vino exclusivo.';
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_validar_linea_venta
+BEFORE INSERT ON linea_venta_vino
+FOR EACH ROW
+EXECUTE FUNCTION fn_trg_validar_linea_venta();
+
+-- Función RPC / Procedimiento: Registrar Venta Completa
+CREATE OR REPLACE FUNCTION fn_registrar_venta_vino(
+    p_cliente_dni VARCHAR,
+    p_vino_id BIGINT,
+    p_cantidad INTEGER
+)
+RETURNS BIGINT AS $$
+DECLARE
+    v_venta_id BIGINT;
+    v_descuento_pct NUMERIC(5,2);
+    v_precio NUMERIC(10,2);
+    v_subtotal NUMERIC(12,2);
+BEGIN
+    -- Obtener descuento de la categoría del cliente
+    SELECT cc.descuento_pct INTO v_descuento_pct
+    FROM cliente c 
+    JOIN categoria_cliente cc ON c.categoria_id = cc.categoria_id
+    WHERE c.dni = p_cliente_dni;
+
+    -- Obtener precio del vino
+    SELECT precio INTO v_precio FROM vino WHERE vino_id = p_vino_id;
+
+    -- Calcular subtotal
+    v_subtotal := v_precio * p_cantidad * (1 - (v_descuento_pct / 100));
+
+    -- Registrar Venta
+    INSERT INTO venta_vino (cliente_dni, fecha, total, descuento_aplicado)
+    VALUES (p_cliente_dni, NOW(), v_subtotal, v_descuento_pct)
+    RETURNING venta_id INTO v_venta_id;
+
+    -- Registrar Línea
+    INSERT INTO linea_venta_vino (venta_id, vino_id, cantidad, precio_unitario)
+    VALUES (v_venta_id, p_vino_id, p_cantidad, v_precio);
+
+    -- Actualizar Stock
+    UPDATE stock 
+    SET cantidad = cantidad - p_cantidad, 
+        ultima_actualizacion = NOW()
+    WHERE vino_id = p_vino_id;
+
+    -- Registrar Movimiento de Stock
+    INSERT INTO movimiento_stock (vino_id, tipo, cantidad)
+    VALUES (p_vino_id, 'SALIDA', p_cantidad);
+
+    RETURN v_venta_id;
+END;
+$$ LANGUAGE plpgsql;
+
+
+-- 6. SEGURIDAD S
+
+ALTER TABLE cliente ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reserva ENABLE ROW LEVEL SECURITY;
+ALTER TABLE venta_vino ENABLE ROW LEVEL SECURITY;
+ALTER TABLE vino ENABLE ROW LEVEL SECURITY;
+
+
+CREATE POLICY "Lectura pública de vinos" ON vino FOR SELECT USING (true);
+CREATE POLICY "Lectura pública de categorías" ON categoria_cliente FOR SELECT USING (true);
